@@ -6,6 +6,11 @@ const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
 
+// Read application info from package.json
+const packageInfo = require('../package.json');
+const APP_NAME = 'VegaDonationEngine';
+const APP_VERSION = packageInfo.version;
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -48,6 +53,13 @@ app.get('/donate', (req, res) => {
         // Check for --preview parameter to enable preview mode (localhost only)
         const enablePreview = process.argv.includes('--preview');
         
+        // Detect environment type
+        const isLocalDev = host === 'localhost' && !process.env.RAILWAY_ENVIRONMENT;
+        const isRailwayDev = process.env.RAILWAY_ENVIRONMENT && process.env.NODE_ENV !== 'production';
+        const isProduction = process.env.NODE_ENV === 'production' || (process.env.RAILWAY_ENVIRONMENT && process.env.NODE_ENV === 'production');
+        const environmentType = isProduction ? 'production' : (isRailwayDev ? 'railway-dev' : 'local-dev');
+        const isTestMode = stripeKey.startsWith('pk_test_');
+        
         // Create the script injection
         const scriptInjection = `    <script>
         // Stripe publishable key injected by server (campaign-specific)
@@ -55,6 +67,14 @@ app.get('/donate', (req, res) => {
         console.log('Stripe key configured:', '${stripeKey.substring(0, 12)}...');
         // Preview mode control (injected by server)
         window.ENABLE_PREVIEW_MODE = ${enablePreview};
+        // Environment information (injected by server)
+        window.ENVIRONMENT_INFO = {
+            type: '${environmentType}',
+            isProduction: ${isProduction},
+            isTestMode: ${isTestMode},
+            host: '${host}',
+            port: ${port}
+        };
     </script>`;
         
         // Insert the script before the widget.js script
@@ -119,7 +139,8 @@ app.post('/api/create-payment-intent', async (req, res) => {
             state,
             zip,
             occupation,
-            employer
+            employer,
+            comment
         } = req.body;
 
         // Validate required fields
@@ -149,12 +170,18 @@ app.post('/api/create-payment-intent', async (req, res) => {
                     country: 'US'
                 },
                 metadata: {
-                    donation_type: donationType,
-                    cover_processing_fee: coverProcessingFee.toString(),
-                    donation_amount: donationAmount.toString(),
-                    processing_fee: processingFee.toString(),
-                    occupation: occupation,
-                    employer: employer
+                    processed_by: APP_NAME,
+                    app_version: APP_VERSION,
+                    occupation: occupation || '',
+                    employer: employer || '',
+                    comment: comment || '',
+                    donor_name: `${firstName} ${lastName}`,
+                    donor_email: email,
+                    phone: phone || '',
+                    address: address || '',
+                    city: city || '',
+                    state: state || '',
+                    zip: zip || ''
                 }
             });
             console.log('✅ Customer created:', customer.id);
@@ -177,9 +204,20 @@ app.post('/api/create-payment-intent', async (req, res) => {
             description: `Donation from ${firstName} ${lastName}`,
             receipt_email: email,
             metadata: {
+                processed_by: APP_NAME,
+                app_version: APP_VERSION,
                 donation_type: donationType,
                 donor_name: `${firstName} ${lastName}`,
-                donor_email: email
+                donor_email: email,
+                donor_phone: phone || '',
+                donor_address: address || '',
+                donor_city: city || '',
+                donor_state: state || '',
+                donor_zip: zip || '',
+                cover_processing_fee: coverProcessingFee.toString(),
+                occupation: occupation || '',
+                employer: employer || '',
+                comment: comment || ''
             }
         };
         
@@ -196,8 +234,11 @@ app.post('/api/create-payment-intent', async (req, res) => {
             const product = await stripe.products.create({
                 name: 'Monthly Donation',
                 metadata: {
+                    processed_by: APP_NAME,
+                    app_version: APP_VERSION,
                     donor_name: `${firstName} ${lastName}`,
-                    donor_email: email
+                    donor_email: email,
+                    comment: comment || ''
                 }
             });
 
@@ -216,11 +257,20 @@ app.post('/api/create-payment-intent', async (req, res) => {
                 payment_behavior: 'default_incomplete',
                 expand: ['latest_invoice.payment_intent'],
                 metadata: {
+                    processed_by: APP_NAME,
+                    app_version: APP_VERSION,
                     donation_type: 'monthly',
                     donor_name: `${firstName} ${lastName}`,
                     donor_email: email,
-                    donation_amount: donationAmount.toString(),
-                    processing_fee: processingFee.toString()
+                    donor_phone: phone || '',
+                    donor_address: address || '',
+                    donor_city: city || '',
+                    donor_state: state || '',
+                    donor_zip: zip || '',
+                    cover_processing_fee: coverProcessingFee.toString(),
+                    occupation: occupation || '',
+                    employer: employer || '',
+                    comment: comment || ''
                 },
                 automatic_tax: {
                     enabled: false,
@@ -406,11 +456,27 @@ const host = (enableNetworkAccess || isProduction) ? '0.0.0.0' : 'localhost';
 
 // Start server
 app.listen(port, host, () => {
-    console.log(`🚀 Donation widget server running at http://${host}:${port}`);
-    console.log(`📝 Widget available at http://localhost:${port}`);
+    const environmentType = isProduction ? 'production' : (process.env.RAILWAY_ENVIRONMENT ? 'railway-dev' : 'local-dev');
+    const isTestMode = (process.env.STRIPE_PUBLISHABLE_KEY || '').startsWith('pk_test_');
+    
+    console.log('='.repeat(60));
+    console.log(`🚀 DONATION WIDGET SERVER STARTED`);
+    console.log('='.repeat(60));
+    console.log(`🎯 Environment: ${environmentType.toUpperCase()}`);
+    console.log(`🔑 Stripe Mode: ${isTestMode ? 'TEST' : 'LIVE'}`);
+    console.log(`🌍 Server: http://${host}:${port}`);
+    console.log(`📝 Widget: http://localhost:${port}`);
+    
+    if (!isProduction) {
+        console.log(`🚨 WARNING: This is a ${environmentType.replace('-', ' ').toUpperCase()} environment!`);
+        console.log(`📝 For production, visit: https://secure.votevega.nyc/donate`);
+    }
+    
     if (isProduction) {
         console.log(`🌐 Production mode: Server bound to ${host} for external access`);
     }
+    
+    console.log('='.repeat(60));
     
     // Show network access info only when --host is used
     if (enableNetworkAccess) {

@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Donate | Vega for Congress</title>
+    <link rel="icon" type="image/png" href="https://votevega.nyc/images/favicon.png">
     <script src="https://js.stripe.com/v3/"></script>
     <link rel="stylesheet" href="css/widget.css">
 </head>
@@ -16,8 +17,8 @@
         </a>
     </div>
     <div class="page-header">
-        <h1>Make a Donation</h1>
-        <p>Support our campaign</p>
+        <h1>Support our campaign.</h1>
+        <p>Help keep us independent. We take no corporate money. We're only backed by people like you.</p>
     </div>
     <div class="donation-widget" id="donation-widget">
         <form id="donation-form">
@@ -96,8 +97,8 @@
                         <input type="email" id="email" placeholder="Email" required>
                     </div>
                     <div class="form-group">
-                        <input type="tel" id="phone" placeholder="Phone (optional, US or intnl)" maxlength="20"
-                            pattern="[0-9\-\(\)\+\s]*" title="Phone number (US or international format)">
+                        <input type="tel" id="phone" placeholder="Phone (US or intnl)" maxlength="20"
+                            pattern="[0-9\-\(\)\+\s\.x,]{7,20}" title="Phone number must be at least 7 digits (US or international format)" required>
                     </div>
                 </div>
                 <div class="form-row">
@@ -166,7 +167,7 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <input type="text" id="zip" pattern="[0-9]{5}(-[0-9]{4})?" placeholder="ZIP Code" maxlength="10"
+                        <input type="text" id="zip" pattern="\d{5}(-\d{4})?" placeholder="ZIP Code" maxlength="10"
                             title="5-digit ZIP code or ZIP+4 format (12345 or 12345-6789)" required>
                     </div>
                 </div>
@@ -177,6 +178,12 @@
                     </div>
                     <div class="form-group">
                         <input type="text" id="employer" placeholder="Your employer" placeholder="Employer" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group full-width">
+                        <textarea id="comment" placeholder="Have a message for the campaign (optional)?" rows="3" maxlength="500"></textarea>
+                        <small style="display: none;" class="field-help">Optional: Share why you're supporting this campaign or add a personal message.</small>
                     </div>
                 </div>
             </div>

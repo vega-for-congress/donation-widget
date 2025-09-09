@@ -50,6 +50,9 @@ class DonationWidget {
             // Add development-only preview option
             this.addDevelopmentPreview();
 
+            // Add environment indicator for non-production environments
+            this.addEnvironmentIndicator();
+
             // Initial calculations
             this.updateTotals();
 
@@ -170,6 +173,21 @@ class DonationWidget {
         // Phone number validation and formatting
         document.getElementById('phone').addEventListener('input', (e) => {
             this.handlePhoneInput(e);
+        });
+        
+        // Phone validation on blur (when user leaves the field)
+        document.getElementById('phone').addEventListener('blur', (e) => {
+            this.handlePhoneBlur(e);
+        });
+        
+        // Email validation on blur
+        document.getElementById('email').addEventListener('blur', (e) => {
+            this.handleEmailBlur(e);
+        });
+        
+        // ZIP code validation on blur
+        document.getElementById('zip').addEventListener('blur', (e) => {
+            this.handleZipBlur(e);
         });
 
         // ZIP code validation
@@ -294,6 +312,18 @@ class DonationWidget {
         return Math.round((amount * this.processingFeeRate + this.processingFeeFixed) * 100) / 100;
     }
 
+    // Calculate what total amount needs to be charged to net a specific amount after Stripe fees
+    calculateTotalForDesiredNet(desiredNetAmount) {
+        if (desiredNetAmount <= 0) return 0;
+        
+        // We need to solve: totalAmount - (totalAmount * rate + fixed) = desiredNetAmount
+        // Rearranging: totalAmount * (1 - rate) - fixed = desiredNetAmount
+        // So: totalAmount = (desiredNetAmount + fixed) / (1 - rate)
+        const totalAmount = (desiredNetAmount + this.processingFeeFixed) / (1 - this.processingFeeRate);
+        
+        return Math.round(totalAmount * 100) / 100;
+    }
+
     updateTotals() {
         const baseAmount = this.selectedAmount || this.customAmount || 0;
         let processingFeeAmount = 0;
@@ -310,20 +340,22 @@ class DonationWidget {
         }
 
         if (this.coverProcessingFee && baseAmount > 0) {
-            // Calculate the full processing fee
-            const fullProcessingFee = this.calculateProcessingFee(baseAmount);
+            // Calculate what total amount needs to be charged so that baseAmount is netted
+            const requiredTotalAmount = this.calculateTotalForDesiredNet(baseAmount);
+            const requiredProcessingFee = requiredTotalAmount - baseAmount;
 
-            // Check if covering the full fee would exceed the contribution limit
-            if (baseAmount + fullProcessingFee > this.maxContributionAmount) {
+            // Check if covering the required fee would exceed the contribution limit
+            if (requiredTotalAmount > this.maxContributionAmount) {
                 // Can only cover partial fee to stay within limit
-                const maxAllowedFee = this.maxContributionAmount - baseAmount;
-                processingFeeAmount = Math.max(0, maxAllowedFee);
+                const maxAllowedTotal = this.maxContributionAmount;
+                processingFeeAmount = maxAllowedTotal - baseAmount;
                 canCoverFee = false;
 
-                console.log(`Partial fee coverage: donation ${baseAmount}, max fee allowed ${maxAllowedFee}, actual fee ${fullProcessingFee}`);
+                console.log(`Partial fee coverage: donation ${baseAmount}, max total allowed ${maxAllowedTotal}, required total ${requiredTotalAmount}`);
             } else {
-                // Can cover the full fee
-                processingFeeAmount = fullProcessingFee;
+                // Can cover the full fee needed to net the desired amount
+                processingFeeAmount = requiredProcessingFee;
+                console.log(`Full fee coverage: donation ${baseAmount}, processing fee ${processingFeeAmount}, total ${requiredTotalAmount} will net ${baseAmount}`);
             }
         }
 
@@ -364,10 +396,14 @@ class DonationWidget {
             // Partial fee coverage situation
             checkbox.disabled = false;
             checkboxLabel.style.opacity = '1';
-            const fullFee = this.calculateProcessingFee(baseAmount);
-            const coveredFee = this.processingFeeAmount;
-            const uncoveredFee = fullFee - coveredFee;
-            feeHelpText.innerHTML = `Covering ${this.formatCurrency(coveredFee)} of ${this.formatCurrency(fullFee)} fee (${this.formatCurrency(uncoveredFee)} due to contribution limit)`;
+            
+            // Calculate what the full fee would be if we could charge the required total
+            const requiredTotalAmount = this.calculateTotalForDesiredNet(baseAmount);
+            const idealProcessingFee = requiredTotalAmount - baseAmount;
+            const actualProcessingFee = this.processingFeeAmount;
+            const uncoveredFee = idealProcessingFee - actualProcessingFee;
+            
+            feeHelpText.innerHTML = `Covering ${this.formatCurrency(actualProcessingFee)} of ${this.formatCurrency(idealProcessingFee)} fee (${this.formatCurrency(uncoveredFee)} not covered due to contribution limit)`;
             feeHelpText.style.color = '#6b7280';
         } else {
             // Normal state
@@ -527,6 +563,74 @@ class DonationWidget {
         console.log('🛠️ Development preview button added (localhost only)');
     }
 
+    addEnvironmentIndicator() {
+        // Check if environment info is available
+        if (!window.ENVIRONMENT_INFO) {
+            return;
+        }
+
+        const env = window.ENVIRONMENT_INFO;
+        
+        // Only show indicator for non-production environments
+        if (env.isProduction) {
+            return;
+        }
+
+        // Log environment information
+        console.log('🛠️ Environment:', env.type);
+        console.log('🔑 Stripe mode:', env.isTestMode ? 'TEST' : 'LIVE');
+        
+        // Create environment indicator banner
+        const banner = document.createElement('div');
+        banner.id = 'environment-indicator';
+        
+        let bannerText = '';
+        let bannerColor = '';
+        
+        if (env.type === 'local-dev') {
+            bannerText = '🛠️ LOCAL DEVELOPMENT MODE';
+            bannerColor = '#1f2937'; // Dark gray
+        } else if (env.type === 'railway-dev') {
+            bannerText = '🚧 DEVELOPMENT ENVIRONMENT';
+            bannerColor = '#dc2626'; // Red
+        }
+        
+        if (env.isTestMode) {
+            bannerText += ' • STRIPE TEST MODE';
+        }
+        
+        banner.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: ${bannerColor};
+            color: white;
+            text-align: center;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            z-index: 9999;
+            border-bottom: 2px solid rgba(255,255,255,0.2);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        `;
+        
+        banner.textContent = bannerText;
+        
+        // Insert banner at the top of the page
+        document.body.insertBefore(banner, document.body.firstChild);
+        
+        // Adjust body padding to account for banner
+        document.body.style.paddingTop = (banner.offsetHeight + 10) + 'px';
+        
+        // Add warning to page title for dev environments
+        if (!env.isProduction) {
+            document.title = '[DEV] ' + document.title;
+        }
+        
+        console.log(`🚨 Development environment indicator added: ${bannerText}`);
+    }
+
     previewConfirmationPage() {
         console.log('🎯 Previewing confirmation page with current form data');
 
@@ -568,6 +672,7 @@ class DonationWidget {
             zip: document.getElementById('zip').value.trim() || '90210',
             occupation: document.getElementById('occupation').value.trim() || 'Software Engineer',
             employer: document.getElementById('employer').value.trim() || 'Tech Company Inc.',
+            comment: document.getElementById('comment').value.trim() || '',
             donationType: this.donationType,
             donationAmount: this.selectedAmount || this.customAmount || 25,
             processingFeeAmount: this.processingFeeAmount || 1.03,
@@ -666,11 +771,224 @@ class DonationWidget {
     }
 
     validateRequiredFields() {
-        const requiredFields = ['first-name', 'last-name', 'email', 'address', 'city', 'state', 'zip', 'occupation', 'employer'];
-        return requiredFields.every(fieldId => {
+        const basicRequiredFields = ['first-name', 'last-name', 'address', 'city', 'state', 'occupation', 'employer'];
+        
+        // Check basic required fields
+        const basicFieldsValid = basicRequiredFields.every(fieldId => {
             const field = document.getElementById(fieldId);
             return field.value.trim() !== '';
         });
+        
+        // Special validation for email, phone, and ZIP (don't show errors during form validation)
+        const emailValid = this.validateEmail(false);
+        const phoneValid = this.validatePhoneNumber(false);
+        const zipValid = this.validateZipCode(false);
+        
+        return basicFieldsValid && emailValid && phoneValid && zipValid;
+    }
+    
+    validatePhoneNumber(showErrors = true) {
+        const phoneField = document.getElementById('phone');
+        const phoneValue = phoneField.value.trim();
+        
+        // Clear any existing error if we're showing errors
+        if (showErrors) {
+            this.clearPhoneError();
+        }
+        
+        // Must not be empty
+        if (!phoneValue) {
+            if (showErrors) this.showPhoneError('Phone number is required');
+            return false;
+        }
+        
+        // Remove all non-digit characters to count digits
+        const digitsOnly = phoneValue.replace(/\D/g, '');
+        
+        // Must have at least 7 digits (minimum for any valid phone number)
+        if (digitsOnly.length < 7) {
+            if (showErrors) this.showPhoneError('Phone number must be at least 7 digits');
+            return false;
+        }
+        
+        // Must not exceed 15 digits (international standard)
+        if (digitsOnly.length > 15) {
+            if (showErrors) this.showPhoneError('Phone number too long (maximum 15 digits)');
+            return false;
+        }
+        
+        // Basic format validation - must contain only allowed characters
+        const validPattern = /^[\d\s\-\(\)\+\.x\,]+$/;
+        if (!validPattern.test(phoneValue)) {
+            if (showErrors) this.showPhoneError('Phone number contains invalid characters');
+            return false;
+        }
+        
+        return true;
+    }
+    
+    validateEmail(showErrors = true) {
+        const emailField = document.getElementById('email');
+        const emailValue = emailField.value.trim();
+        
+        // Clear any existing error if we're showing errors
+        if (showErrors) {
+            this.clearEmailError();
+        }
+        
+        // Must not be empty
+        if (!emailValue) {
+            if (showErrors) this.showEmailError('Email address is required');
+            return false;
+        }
+        
+        // Basic email format validation
+        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailPattern.test(emailValue)) {
+            if (showErrors) this.showEmailError('Please enter a valid email address');
+            return false;
+        }
+        
+        // Check for common typos in domain
+        const commonDomainTypos = {
+            'gmail.co': 'gmail.com',
+            'gmail.cm': 'gmail.com',
+            'gmial.com': 'gmail.com',
+            'yahoo.co': 'yahoo.com',
+            'yahoo.cm': 'yahoo.com',
+            'hotmail.co': 'hotmail.com',
+            'hotmail.cm': 'hotmail.com'
+        };
+        
+        const domain = emailValue.split('@')[1];
+        if (commonDomainTypos[domain]) {
+            if (showErrors) {
+                this.showEmailError(`Did you mean ${emailValue.split('@')[0]}@${commonDomainTypos[domain]}?`);
+            }
+            return false;
+        }
+        
+        return true;
+    }
+    
+    validateZipCode(showErrors = true) {
+        const zipField = document.getElementById('zip');
+        const zipValue = zipField.value.trim();
+        
+        // Clear any existing error if we're showing errors
+        if (showErrors) {
+            this.clearZipError();
+        }
+        
+        // Must not be empty
+        if (!zipValue) {
+            if (showErrors) this.showZipError('ZIP code is required');
+            return false;
+        }
+        
+        // Remove hyphens for length check
+        const zipDigits = zipValue.replace(/[^0-9]/g, '');
+        
+        // Must be either 5 digits or 9 digits (ZIP+4)
+        if (zipDigits.length !== 5 && zipDigits.length !== 9) {
+            if (showErrors) this.showZipError('ZIP code must be 5 digits (12345) or 9 digits (12345-6789)');
+            return false;
+        }
+        
+        // Validate format
+        const zipPattern = /^\d{5}(-\d{4})?$/;
+        if (!zipPattern.test(zipValue)) {
+            if (showErrors) this.showZipError('ZIP code format invalid. Use 12345 or 12345-6789');
+            return false;
+        }
+        
+        return true;
+    }
+    
+    showPhoneError(message) {
+        // Find or create phone error element
+        let errorElement = document.getElementById('phone-error');
+        if (!errorElement) {
+            errorElement = document.createElement('div');
+            errorElement.id = 'phone-error';
+            errorElement.className = 'field-error-message';
+            errorElement.style.cssText = `
+                color: #dc2626;
+                font-size: 12px;
+                margin-top: 4px;
+                display: block;
+            `;
+            
+            // Insert after the phone input
+            const phoneInput = document.getElementById('phone');
+            phoneInput.parentNode.insertBefore(errorElement, phoneInput.nextSibling);
+        }
+        
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+    }
+    
+    clearPhoneError() {
+        const errorElement = document.getElementById('phone-error');
+        if (errorElement) {
+            errorElement.style.display = 'none';
+        }
+    }
+    
+    showEmailError(message) {
+        let errorElement = document.getElementById('email-error');
+        if (!errorElement) {
+            errorElement = document.createElement('div');
+            errorElement.id = 'email-error';
+            errorElement.className = 'field-error-message';
+            errorElement.style.cssText = `
+                color: #dc2626;
+                font-size: 12px;
+                margin-top: 4px;
+                display: block;
+            `;
+            
+            const emailInput = document.getElementById('email');
+            emailInput.parentNode.insertBefore(errorElement, emailInput.nextSibling);
+        }
+        
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+    }
+    
+    clearEmailError() {
+        const errorElement = document.getElementById('email-error');
+        if (errorElement) {
+            errorElement.style.display = 'none';
+        }
+    }
+    
+    showZipError(message) {
+        let errorElement = document.getElementById('zip-error');
+        if (!errorElement) {
+            errorElement = document.createElement('div');
+            errorElement.id = 'zip-error';
+            errorElement.className = 'field-error-message';
+            errorElement.style.cssText = `
+                color: #dc2626;
+                font-size: 12px;
+                margin-top: 4px;
+                display: block;
+            `;
+            
+            const zipInput = document.getElementById('zip');
+            zipInput.parentNode.insertBefore(errorElement, zipInput.nextSibling);
+        }
+        
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+    }
+    
+    clearZipError() {
+        const errorElement = document.getElementById('zip-error');
+        if (errorElement) {
+            errorElement.style.display = 'none';
+        }
     }
 
     async handleSubmit() {
@@ -746,6 +1064,7 @@ class DonationWidget {
             zip: document.getElementById('zip').value.trim(),
             occupation: document.getElementById('occupation').value.trim(),
             employer: document.getElementById('employer').value.trim(),
+            comment: document.getElementById('comment').value.trim(),
             amount: Math.round(this.totalAmount * 100), // Convert to cents
             donationAmount: Math.round((this.selectedAmount || this.customAmount) * 100),
             processingFee: Math.round(this.processingFeeAmount * 100),
@@ -854,7 +1173,28 @@ class DonationWidget {
             input.value = formattedValue;
         }
 
+        // Clear any existing phone error when user is typing
+        this.clearPhoneError();
+        
         // Update button state
+        this.updateDonateButton();
+    }
+    
+    handlePhoneBlur(event) {
+        // Validate phone number and show errors when user leaves the field
+        this.validatePhoneNumber(true);
+        this.updateDonateButton();
+    }
+    
+    handleEmailBlur(event) {
+        // Validate email and show errors when user leaves the field
+        this.validateEmail(true);
+        this.updateDonateButton();
+    }
+    
+    handleZipBlur(event) {
+        // Validate ZIP code and show errors when user leaves the field
+        this.validateZipCode(true);
         this.updateDonateButton();
     }
 
