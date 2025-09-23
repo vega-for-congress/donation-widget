@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Donate | Vega for Congress</title>
+    <link rel="icon" type="image/png" href="https://votevega.nyc/images/favicon.png">
+    <script src="https://js.stripe.com/v3/"></script>
+    <link rel="stylesheet" href="css/widget.css">
+</head>
+
+<body>
+    <div class="logo">
+        <a href="https://votevega.nyc/">
+            <img src="./assets/vega-red-black.png" />
+        </a>
+    </div>
+    <div class="page-header">
+        <h1>Support our campaign.</h1>
+        <p>Help keep us independent. We take no corporate money. We're only backed by people like you.</p>
+    </div>
+    <div class="donation-widget" id="donation-widget">
+        <form id="donation-form">
+            <!-- Donation Amount Selection -->
+            <div class="amount-section">
+                <h3>Select Amount</h3>
+                <div class="amount-grid">
+                    <button type="button" class="amount-btn" data-amount="25">$25</button>
+                    <button type="button" class="amount-btn" data-amount="50">$50</button>
+                    <button type="button" class="amount-btn" data-amount="100">$100</button>
+                    <button type="button" class="amount-btn" data-amount="250">$250</button>
+                    <button type="button" class="amount-btn" data-amount="500">$500</button>
+                    <button type="button" class="amount-btn" data-amount="1000">$1,000</button>
+                    <button type="button" class="amount-btn" data-amount="3500">$3,500</button>
+                    <div class="custom-amount-input">
+                        <div class="input-wrapper">
+                            <span class="dollar-sign">$</span>
+                            <input type="number" id="custom-amount-input" placeholder="0.00" min="1" step="0.01">
+                        </div>
+                    </div>
+                </div>
+                <div class="custom-amount">
+                    <label for="custom-amount-input">Other Amount:</label>
+                    <div class="input-wrapper">
+                        <span class="dollar-sign">$</span>
+                        <input type="number" id="custom-amount-input" placeholder="0.00" min="1" step="0.01">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Donation Type -->
+            <div class="donation-type-section">
+                <h3>Make it monthly!</h3>
+                <div class="donation-type-buttons">
+                    <label class="donation-type-btn active">
+                        <input type="radio" name="donation-type" value="monthly" checked>
+                        <span class="btn-content">
+                            <span class="btn-title">Yes, count me in!</span>
+                        </span>
+                    </label>
+                    <label class="donation-type-btn">
+                        <input type="radio" name="donation-type" value="one-time">
+                        <span class="btn-content">
+                            <span class="btn-title">No, donate once</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Processing Fee -->
+            <div class="processing-fee-section">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="cover-processing-fee" checked>
+                    <span class="checkbox-custom"></span>
+                    <span class="fee-text">
+                        Cover the processing fee <span class="fee-amount">($0.00)</span>
+                        <small class="fee-help">100% of your donation goes to the campaign</small>
+                    </span>
+                </label>
+            </div>
+
+            <!-- Donor Information -->
+            <div class="donor-info-section">
+                <h3>Your Information</h3>
+                <small>*All fields required unless otherwise noted.</small>
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="text" id="first-name" placeholder="First Name" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="last-name" placeholder="Last Name" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="email" id="email" placeholder="Email" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="tel" id="phone" placeholder="Phone (US or intnl)" maxlength="20"
+                            pattern="[0-9\-\(\)\+\s\.x,]{7,20}" title="Phone number must be at least 7 digits (US or international format)" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group full-width">
+                        <input type="text" id="address" placeholder="Street address" placeholder="Address" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="text" id="city" placeholder="City" required>
+                    </div>
+                    <div class="form-group">
+                        <select id="state" placeholder="State" required>
+                            <option value="">Select State</option>
+                            <option value="AL">Alabama</option>
+                            <option value="AK">Alaska</option>
+                            <option value="AZ">Arizona</option>
+                            <option value="AR">Arkansas</option>
+                            <option value="CA">California</option>
+                            <option value="CO">Colorado</option>
+                            <option value="CT">Connecticut</option>
+                            <option value="DE">Delaware</option>
+                            <option value="DC">District of Columbia</option>
+                            <option value="FL">Florida</option>
+                            <option value="GA">Georgia</option>
+                            <option value="HI">Hawaii</option>
+                            <option value="ID">Idaho</option>
+                            <option value="IL">Illinois</option>
+                            <option value="IN">Indiana</option>
+                            <option value="IA">Iowa</option>
+                            <option value="KS">Kansas</option>
+                            <option value="KY">Kentucky</option>
+                            <option value="LA">Louisiana</option>
+                            <option value="ME">Maine</option>
+                            <option value="MD">Maryland</option>
+                            <option value="MA">Massachusetts</option>
+                            <option value="MI">Michigan</option>
+                            <option value="MN">Minnesota</option>
+                            <option value="MS">Mississippi</option>
+                            <option value="MO">Missouri</option>
+                            <option value="MT">Montana</option>
+                            <option value="NE">Nebraska</option>
+                            <option value="NV">Nevada</option>
+                            <option value="NH">New Hampshire</option>
+                            <option value="NJ">New Jersey</option>
+                            <option value="NM">New Mexico</option>
+                            <option value="NY">New York</option>
+                            <option value="NC">North Carolina</option>
+                            <option value="ND">North Dakota</option>
+                            <option value="OH">Ohio</option>
+                            <option value="OK">Oklahoma</option>
+                            <option value="OR">Oregon</option>
+                            <option value="PA">Pennsylvania</option>
+                            <option value="RI">Rhode Island</option>
+                            <option value="SC">South Carolina</option>
+                            <option value="SD">South Dakota</option>
+                            <option value="TN">Tennessee</option>
+                            <option value="TX">Texas</option>
+                            <option value="UT">Utah</option>
+                            <option value="VT">Vermont</option>
+                            <option value="VA">Virginia</option>
+                            <option value="WA">Washington</option>
+                            <option value="WV">West Virginia</option>
+                            <option value="WI">Wisconsin</option>
+                            <option value="WY">Wyoming</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="zip" pattern="\d{5}(-\d{4})?" placeholder="ZIP Code" maxlength="10"
+                            title="5-digit ZIP code or ZIP+4 format (12345 or 12345-6789)" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="text" id="occupation" placeholder="Your occupation" placeholder="Occupation"
+                            required>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="employer" placeholder="Your employer" placeholder="Employer" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group full-width">
+                        <textarea id="comment" placeholder="Have a message for the campaign (optional)?" rows="3" maxlength="500"></textarea>
+                        <small style="display: none;" class="field-help">Optional: Share why you're supporting this campaign or add a personal message.</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Payment Information -->
+            <div class="payment-section">
+                <h3>Payment Information</h3>
+                <div id="card-element" class="stripe-element">
+                    <!-- Stripe Elements will create form elements here -->
+                </div>
+                <div id="card-errors" class="error-message" role="alert"></div>
+            </div>
+
+            <!-- Total and Submit -->
+            <div class="total-section">
+                <div class="total-breakdown">
+                    <div class="breakdown-row">
+                        <span>Donation:</span>
+                        <span id="donation-amount-display">$0.00</span>
+                    </div>
+                    <div class="breakdown-row" id="fee-breakdown">
+                        <span>Processing Fee:</span>
+                        <span id="processing-fee-display">$0.00</span>
+                    </div>
+                    <div class="breakdown-row total-row">
+                        <span>Total:</span>
+                        <span id="total-amount-display">$0.00</span>
+                    </div>
+                </div>
+                <button type="submit" id="donate-button" disabled>
+                    <span id="button-text">Donate Now</span>
+                    <div id="spinner" class="spinner" style="display: none;"></div>
+                </button>
+                <div class="stripe-badge">
+                    <span>Powered by</span>
+                    <img src="./assets/Stripe_wordmark_-_slate.svg" alt="Stripe stylized wordmark" />
+                    <!-- https://stripe.com/legal/marks -->
+                </div>
+            </div>
+        </form>
+
+        <!-- Success Message -->
+        <div id="success-message" class="success-message" style="display: none;">
+            <div class="success-icon">✓</div>
+            <h3>Thank you for your donation!</h3>
+            <p>Your contribution makes a huge difference.</p>
+        </div>
+
+        <!-- Contribution Rules -->
+        <div class="contribution-rules">
+            <h4>Contribution rules</h4>
+            <ul>
+                <li>I am a U.S. citizen or lawfully admitted permanent resident (i.e., green card holder).</li>
+                <li>This contribution is made from my own funds, and funds are not being provided to me by another
+                    person or entity for the purpose of making this contribution.</li>
+                <li>I am at least eighteen years old.</li>
+                <li>I am not a federal contractor.</li>
+                <li>I am making this contribution with my own personal credit card and not with a corporate or business
+                    credit card or a card issued to another person.</li>
+            </ul>
+
+            <div class="legal-disclaimers">
+                <p><strong>Federal Election Commission Disclaimer:</strong> By proceeding with this transaction, you
+                    agree to the contribution rules above. Contributions to political candidates are not tax-deductible
+                    for federal income tax purposes.</p>
+
+                <p><strong>Platform Disclaimer:</strong> This donation platform is paid for by Vega For Congress and not
+                    authorized by any other candidate or candidate committee. For questions about donations, please
+                    contact <a href="mailto:info@votevega.nyc">info@votevega.nyc</a>.</p>
+
+                <p><strong>Contribution Limits:</strong> Federal law requires us to use our best efforts to collect and
+                    report the name, mailing address, occupation and name of employer of individuals whose contributions
+                    exceed $200 in a calendar year. The maximum amount an individual may contribute is $3,500 for the
+                    primary plus an additional $3,500 for the general election for a total of $7,000 per
+                    election.</p>
+            </div>
+        </div>
+    </div>
+
+    <footer
+        style="text-align: center; padding: 20px; margin-top: 30px; border-top: 1px solid #eee; background: #f9f9f9;">
+        <p>
+            <a href="privacy.html" style="color: var(--primaryColor); text-decoration: none; margin: 0 10px;">Privacy
+                Policy</a> |
+            <a href="terms.html" style="color: var(--primaryColor); text-decoration: none; margin: 0 10px;">Terms of
+                Service</a>
+        </p>
+        <p style="font-size: 12px; color: #666; margin-top: 10px;">
+            Paid for by Vega for Congress. Not authorized by any candidate or candidate's committee.
+        </p>
+    </footer>
+
+    <script src="js/widget.js"></script>
+</body>
+
+</html>

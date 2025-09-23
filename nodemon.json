@@ -7,7 +7,7 @@
     "assets/",
     ".env"
   ],
-  "ext": "js,json,html,css",
+  "ext": "js,cjs,json,html,css",
   "ignore": [
     "node_modules/",
     "*.log",
