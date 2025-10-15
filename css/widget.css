@@ -6,7 +6,7 @@
 }
 
 :root {
-    --primaryColor: oklch(45.7% 0.24 277.023);
+    --primaryColor: #FF1D2A;
     --white: #ffffff;
   }
 
@@ -622,7 +622,6 @@ h3 {
 /* Contribution Rules */
 .contribution-rules {
     padding: 24px;
-    background: #fafbfc;
     border-top: 1px solid #e1e5e9;
     font-size: 14px;
     line-height: 1.5;
