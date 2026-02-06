@@ -11,6 +11,9 @@ const packageInfo = require('../package.json');
 const APP_NAME = 'VegaDonationEngine';
 const APP_VERSION = packageInfo.version;
 
+// Form submission worker URL (for adding donors to NocoDB)
+const FORM_WORKER_URL = 'https://votevega-form-submission.vega-signup.workers.dev';
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -299,6 +302,10 @@ app.post('/api/create-payment-intent', async (req, res) => {
             }
 
             console.log('✅ Monthly subscription created:', subscription.id);
+
+            // Submit donor to NocoDB via worker (non-blocking)
+            submitDonorToWorker({ name: `${firstName} ${lastName}`, email, phone, zip });
+
             res.json({
                 subscriptionId: subscription.id,
                 clientSecret: subscription.latest_invoice.payment_intent.client_secret
@@ -309,6 +316,9 @@ app.post('/api/create-payment-intent', async (req, res) => {
             console.log('💳 Creating one-time payment intent with amount:', amount);
             const paymentIntent = await stripe.paymentIntents.create(paymentIntentData);
             console.log('✅ Payment intent created:', paymentIntent.id);
+
+            // Submit donor to NocoDB via worker (non-blocking)
+            submitDonorToWorker({ name: `${firstName} ${lastName}`, email, phone, zip });
 
             res.json({
                 clientSecret: paymentIntent.client_secret
@@ -409,6 +419,48 @@ app.get('/api/status', (req, res) => {
 });
 
 // Helper functions for webhook handling
+
+/**
+ * Submit donor information to NocoDB via Cloudflare worker (non-blocking)
+ * This runs asynchronously and will not block the payment flow if it fails
+ */
+function submitDonorToWorker(donorData) {
+    const payload = {
+        name: donorData.name,
+        email: donorData.email,
+        phone: donorData.phone || '',
+        zip: donorData.zip || '',
+        source: 'stripe',
+    };
+
+    // Determine origin based on environment
+    const isRailwayProd = process.env.RAILWAY_ENVIRONMENT && process.env.NODE_ENV === 'production';
+    const isRailwayDev = process.env.RAILWAY_ENVIRONMENT && process.env.NODE_ENV !== 'production';
+    const origin = isRailwayProd ? 'https://secure.votevega.nyc'
+        : isRailwayDev ? 'https://donation-widget-dev.up.railway.app'
+        : 'http://localhost:3000';
+
+    // Fire-and-forget: don't await, handle errors silently
+    fetch(FORM_WORKER_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Origin': origin,
+        },
+        body: JSON.stringify(payload),
+    })
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {
+                    console.error('⚠️ Worker API error:', response.status, text);
+                });
+            }
+            console.log('✅ Donor submitted to worker:', donorData.email);
+        })
+        .catch(error => {
+            console.error('⚠️ Worker submission failed (non-blocking):', error.message);
+        });
+}
 
 // Handle invoice payment succeeded event
 async function handleInvoicePaymentSucceeded(invoice) {
