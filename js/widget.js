@@ -1065,6 +1065,7 @@ class DonationWidget {
             occupation: document.getElementById('occupation').value.trim(),
             employer: document.getElementById('employer').value.trim(),
             comment: document.getElementById('comment').value.trim(),
+            emailOptIn: document.getElementById('email-optin').checked,
             amount: Math.round(this.totalAmount * 100), // Convert to cents
             donationAmount: Math.round((this.selectedAmount || this.customAmount) * 100),
             processingFee: Math.round(this.processingFeeAmount * 100),

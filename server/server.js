@@ -304,7 +304,7 @@ app.post('/api/create-payment-intent', async (req, res) => {
             console.log('✅ Monthly subscription created:', subscription.id);
 
             // Submit donor to NocoDB via worker (non-blocking)
-            submitDonorToWorker({ name: `${firstName} ${lastName}`, email, phone, zip });
+            submitDonorToWorker({ name: `${firstName} ${lastName}`, email, phone, zip, emailOptIn: req.body.emailOptIn, comment });
 
             res.json({
                 subscriptionId: subscription.id,
@@ -318,7 +318,7 @@ app.post('/api/create-payment-intent', async (req, res) => {
             console.log('✅ Payment intent created:', paymentIntent.id);
 
             // Submit donor to NocoDB via worker (non-blocking)
-            submitDonorToWorker({ name: `${firstName} ${lastName}`, email, phone, zip });
+            submitDonorToWorker({ name: `${firstName} ${lastName}`, email, phone, zip, emailOptIn: req.body.emailOptIn, comment });
 
             res.json({
                 clientSecret: paymentIntent.client_secret
@@ -431,6 +431,8 @@ function submitDonorToWorker(donorData) {
         phone: donorData.phone || '',
         zip: donorData.zip || '',
         source: 'stripe',
+        emailOptIn: donorData.emailOptIn === true, // Only true if explicitly opted in
+        comment: donorData.comment || '',
     };
 
     // Determine origin based on environment
