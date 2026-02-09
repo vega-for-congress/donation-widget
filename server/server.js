@@ -22,7 +22,14 @@ const stripe = require('stripe')(process.env.STRIPE_RESTRICTED_KEY);
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Parse JSON for all routes EXCEPT /webhook (which needs raw body for signature verification)
+app.use((req, res, next) => {
+    if (req.originalUrl === '/webhook') {
+        next();
+    } else {
+        express.json()(req, res, next);
+    }
+});
 
 // Serve the homepage with redirect to /donate
 app.get('/', (req, res) => {
