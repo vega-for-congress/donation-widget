@@ -22,7 +22,14 @@ const stripe = require('stripe')(process.env.STRIPE_RESTRICTED_KEY);
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Parse JSON for all routes EXCEPT /webhook (which needs raw body for signature verification)
+app.use((req, res, next) => {
+    if (req.originalUrl === '/webhook') {
+        next();
+    } else {
+        express.json()(req, res, next);
+    }
+});
 
 // Serve the homepage with redirect to /donate
 app.get('/', (req, res) => {
@@ -220,7 +227,8 @@ app.post('/api/create-payment-intent', async (req, res) => {
                 cover_processing_fee: coverProcessingFee.toString(),
                 occupation: occupation || '',
                 employer: employer || '',
-                comment: comment || ''
+                comment: comment || '',
+                email_opt_in: (req.body.emailOptIn === true).toString()
             }
         };
         
@@ -273,7 +281,8 @@ app.post('/api/create-payment-intent', async (req, res) => {
                     cover_processing_fee: coverProcessingFee.toString(),
                     occupation: occupation || '',
                     employer: employer || '',
-                    comment: comment || ''
+                    comment: comment || '',
+                    email_opt_in: (req.body.emailOptIn === true).toString()
                 },
                 automatic_tax: {
                     enabled: false,
@@ -303,8 +312,7 @@ app.post('/api/create-payment-intent', async (req, res) => {
 
             console.log('✅ Monthly subscription created:', subscription.id);
 
-            // Submit donor to NocoDB via worker (non-blocking)
-            submitDonorToWorker({ name: `${firstName} ${lastName}`, email, phone, zip, emailOptIn: req.body.emailOptIn, comment });
+            // Note: Donor will be submitted to NocoDB via webhook when payment succeeds
 
             res.json({
                 subscriptionId: subscription.id,
@@ -317,8 +325,7 @@ app.post('/api/create-payment-intent', async (req, res) => {
             const paymentIntent = await stripe.paymentIntents.create(paymentIntentData);
             console.log('✅ Payment intent created:', paymentIntent.id);
 
-            // Submit donor to NocoDB via worker (non-blocking)
-            submitDonorToWorker({ name: `${firstName} ${lastName}`, email, phone, zip, emailOptIn: req.body.emailOptIn, comment });
+            // Note: Donor will be submitted to NocoDB via webhook when payment succeeds
 
             res.json({
                 clientSecret: paymentIntent.client_secret
@@ -364,7 +371,9 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
         case 'payment_intent.succeeded':
             const paymentIntent = event.data.object;
             console.log('💰 Payment succeeded:', paymentIntent.id);
-            // Handle successful payment (e.g., send confirmation email, update database)
+            
+            // Submit donor to NocoDB via worker (only after payment confirmed)
+            handlePaymentSucceeded(paymentIntent);
             break;
 
         case 'payment_intent.payment_failed':
@@ -467,20 +476,42 @@ function submitDonorToWorker(donorData) {
 // Handle invoice payment succeeded event
 async function handleInvoicePaymentSucceeded(invoice) {
     try {
-        console.log('📧 Attempting to send receipt email for invoice:', invoice.id);
+        console.log('📧 Invoice payment succeeded:', invoice.id);
         
-        // Try to send the invoice via email
-        // First check if the invoice can be sent (not already sent)
-        if (invoice.status === 'paid' && invoice.customer_email) {
-            // For paid invoices with customer email, manually trigger email
-            console.log(`📧 Sending receipt to ${invoice.customer_email} for invoice ${invoice.id}`);
+        // For subscription first payment, submit donor to NocoDB
+        // billing_reason: 'subscription_create' = first payment, 'subscription_cycle' = recurring
+        if (invoice.subscription && invoice.billing_reason === 'subscription_create') {
+            console.log('🎉 First subscription payment - submitting donor to NocoDB');
             
-            // We cannot use sendInvoice for paid invoices, but we can create a custom email
-            // In a production environment, you'd use your email service (SendGrid, etc.)
-            console.log('📧 Receipt email would be sent here in production environment');
-            console.log(`   - To: ${invoice.customer_email}`);
-            console.log(`   - Amount: $${(invoice.amount_paid / 100).toFixed(2)}`);
-            console.log(`   - Date: ${new Date(invoice.status_transitions.paid_at * 1000).toLocaleString()}`);
+            // Fetch the subscription to get our metadata
+            const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
+            const metadata = subscription.metadata || {};
+            
+            // Check if this is one of our subscriptions
+            if (metadata.processed_by === APP_NAME) {
+                const donorData = {
+                    name: metadata.donor_name || '',
+                    email: metadata.donor_email || invoice.customer_email || '',
+                    phone: metadata.donor_phone || '',
+                    zip: metadata.donor_zip || '',
+                    emailOptIn: metadata.email_opt_in === 'true',
+                    comment: metadata.comment || ''
+                };
+                
+                if (donorData.email) {
+                    console.log('📤 Submitting subscription donor to NocoDB:', donorData.email);
+                    submitDonorToWorker(donorData);
+                } else {
+                    console.warn('⚠️ No email in subscription metadata');
+                }
+            }
+        } else if (invoice.billing_reason === 'subscription_cycle') {
+            console.log('🔄 Recurring subscription payment - not re-submitting donor');
+        }
+        
+        // Log receipt info
+        if (invoice.status === 'paid' && invoice.customer_email) {
+            console.log(`📧 Receipt for ${invoice.customer_email}: $${(invoice.amount_paid / 100).toFixed(2)}`);
         }
     } catch (error) {
         console.error('⚠️ Error in handleInvoicePaymentSucceeded:', error.message);
@@ -499,6 +530,44 @@ async function handleInvoiceFinalized(invoice) {
         }
     } catch (error) {
         console.error('⚠️ Error in handleInvoiceFinalized:', error.message);
+    }
+}
+
+/**
+ * Handle successful payment - submit donor to NocoDB
+ * This is called from the webhook after payment is confirmed
+ */
+function handlePaymentSucceeded(paymentIntent) {
+    try {
+        const metadata = paymentIntent.metadata || {};
+        
+        // Check if this is one of our donations (has our metadata)
+        if (metadata.processed_by !== APP_NAME) {
+            console.log('ℹ️ Payment not from our app, skipping donor submission');
+            return;
+        }
+        
+        // Extract donor info from metadata
+        const donorData = {
+            name: metadata.donor_name || '',
+            email: metadata.donor_email || paymentIntent.receipt_email || '',
+            phone: metadata.donor_phone || '',
+            zip: metadata.donor_zip || '',
+            emailOptIn: metadata.email_opt_in === 'true',
+            comment: metadata.comment || ''
+        };
+        
+        // Validate we have minimum required data
+        if (!donorData.email) {
+            console.warn('⚠️ No email in payment metadata, skipping donor submission');
+            return;
+        }
+        
+        console.log('📤 Submitting donor to NocoDB after successful payment:', donorData.email);
+        submitDonorToWorker(donorData);
+        
+    } catch (error) {
+        console.error('⚠️ Error in handlePaymentSucceeded:', error.message);
     }
 }
 
