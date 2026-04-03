@@ -211,6 +211,7 @@ app.post('/api/create-payment-intent', async (req, res) => {
         const paymentIntentData = {
             amount: amount, // Amount in cents
             currency: 'usd',
+            automatic_payment_methods: { enabled: true },
             description: `Donation from ${firstName} ${lastName}`,
             receipt_email: email,
             metadata: {
@@ -266,6 +267,9 @@ app.post('/api/create-payment-intent', async (req, res) => {
                 customer: customer.id, // Customer is required (we validated this above)
                 items: [{ price: price.id }],
                 payment_behavior: 'default_incomplete',
+                payment_settings: {
+                    payment_method_types: ['card', 'link'],
+                },
                 expand: ['latest_invoice.payment_intent'],
                 metadata: {
                     processed_by: APP_NAME,

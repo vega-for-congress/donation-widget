@@ -5,7 +5,9 @@ class DonationWidget {
         this.stripePublishableKey = window.STRIPE_PUBLISHABLE_KEY || 'pk_test_dummy_key_replace_with_real_key';
         this.stripe = null;
         this.elements = null;
-        this.card = null;
+        this.paymentElement = null;
+        this.linkAuthElement = null;
+        this.addressElement = null;
 
         // State
         this.selectedAmount = 0;
@@ -15,9 +17,14 @@ class DonationWidget {
         this.processingFeeAmount = 0;
         this.totalAmount = 0;
 
-        // Card validation state
-        this.cardComplete = false;
-        this.cardEmpty = true;
+        // Element validation state
+        this.paymentComplete = false;
+        this.addressComplete = false;
+        this.linkAuthComplete = false;
+
+        // Values collected from Stripe Elements (for server-side metadata)
+        this.linkAuthEmail = '';
+        this.addressValues = {};
 
         // Processing fee calculation (typical rates: 2.9% + $0.30)
         this.processingFeeRate = 0.029;
@@ -33,7 +40,22 @@ class DonationWidget {
         try {
             // Initialize Stripe
             this.stripe = Stripe(this.stripePublishableKey);
-            this.elements = this.stripe.elements();
+
+            // Initialize Elements with deferred intent (amount set later via updateTotals)
+            this.elements = this.stripe.elements({
+                mode: 'payment',
+                amount: 100, // minimum placeholder in cents, updated dynamically
+                currency: 'usd',
+                appearance: {
+                    theme: 'stripe',
+                    variables: {
+                        colorPrimary: '#FF1D2A',
+                        colorText: '#374151',
+                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+                        borderRadius: '4px',
+                    },
+                },
+            });
 
             // Setup Stripe Elements
             this.setupStripeElements();
@@ -63,48 +85,58 @@ class DonationWidget {
     }
 
     setupStripeElements() {
-        // Create card element without ZIP code collection (we collect it in the form)
-        this.card = this.elements.create('card', {
-            style: {
-                base: {
-                    fontSize: '16px',
-                    color: '#374151',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                    '::placeholder': {
-                        color: '#9ca3af',
-                    },
-                },
-                invalid: {
-                    color: '#dc2626',
-                },
-            },
-            hidePostalCode: true, // Don't show ZIP code in card element since we collect it above
+        // 1. Link Authentication Element — email field that triggers Link auto-fill
+        this.linkAuthElement = this.elements.create('linkAuthentication');
+        this.linkAuthElement.mount('#link-authentication-element');
+
+        this.linkAuthElement.on('change', (event) => {
+            this.linkAuthComplete = event.complete;
+            this.linkAuthEmail = event.value?.email || '';
+            this.updateDonateButton();
         });
 
-        // Mount card element
-        this.card.mount('#card-element');
+        // 2. Address Element — billing name, phone, and address (auto-filled by Link)
+        this.addressElement = this.elements.create('address', {
+            mode: 'billing',
+            fields: {
+                phone: 'always',
+            },
+            display: {
+                name: 'split',
+            },
+            defaultValues: {
+                address: {
+                    country: 'US',
+                },
+            },
+        });
+        this.addressElement.mount('#address-element');
 
-        // Handle card changes
-        this.card.on('change', (event) => {
+        this.addressElement.on('change', (event) => {
+            this.addressComplete = event.complete;
+            if (event.value) {
+                this.addressValues = event.value;
+            }
+            this.updateDonateButton();
+        });
+
+        // 3. Payment Element — card input with Link shown prominently
+        this.paymentElement = this.elements.create('payment', {
+            layout: {
+                type: 'tabs',
+                defaultCollapsed: false,
+            },
+        });
+        this.paymentElement.mount('#payment-element');
+
+        this.paymentElement.on('change', (event) => {
+            this.paymentComplete = event.complete;
             const displayError = document.getElementById('card-errors');
-
-            // Update card validation state
-            this.cardComplete = event.complete;
-            this.cardEmpty = event.empty;
-
             if (event.error) {
                 displayError.textContent = event.error.message;
             } else {
                 displayError.textContent = '';
             }
-
-            // Optional: Enable debug logging for development
-            // console.log('Card state:', {
-            //     complete: event.complete,
-            //     empty: event.empty,
-            //     error: event.error?.message || null
-            // });
-
             this.updateDonateButton();
         });
     }
@@ -124,11 +156,6 @@ class DonationWidget {
             this.clearSelectedAmountButtons();
             this.handleCustomAmount();
         });
-
-        // customAmountInput.addEventListener('focus', () => {
-        //     this.clearSelectedAmountButtons();
-        //     this.handleCustomAmount();
-        // });
 
         // Donation type buttons (ActBlue style)
         document.querySelectorAll('.donation-type-btn').forEach(btn => {
@@ -154,12 +181,9 @@ class DonationWidget {
             this.updateTotals();
         });
 
-        // Form inputs for validation
-        document.querySelectorAll('input[required], select[required]').forEach(input => {
+        // FEC fields (occupation, employer) validation
+        document.querySelectorAll('#occupation, #employer').forEach(input => {
             input.addEventListener('input', () => {
-                this.updateDonateButton();
-            });
-            input.addEventListener('change', () => {
                 this.updateDonateButton();
             });
         });
@@ -168,31 +192,6 @@ class DonationWidget {
         document.getElementById('donation-form').addEventListener('submit', (e) => {
             e.preventDefault();
             this.handleSubmit();
-        });
-
-        // Phone number validation and formatting
-        document.getElementById('phone').addEventListener('input', (e) => {
-            this.handlePhoneInput(e);
-        });
-        
-        // Phone validation on blur (when user leaves the field)
-        document.getElementById('phone').addEventListener('blur', (e) => {
-            this.handlePhoneBlur(e);
-        });
-        
-        // Email validation on blur
-        document.getElementById('email').addEventListener('blur', (e) => {
-            this.handleEmailBlur(e);
-        });
-        
-        // ZIP code validation on blur
-        document.getElementById('zip').addEventListener('blur', (e) => {
-            this.handleZipBlur(e);
-        });
-
-        // ZIP code validation
-        document.getElementById('zip').addEventListener('input', (e) => {
-            this.handleZipInput(e);
         });
     }
 
@@ -365,6 +364,15 @@ class DonationWidget {
         this.processingFeeAmount = processingFeeAmount;
         this.totalAmount = totalAmount;
 
+        // Sync amount to Stripe Elements (in cents, minimum 100)
+        const amountInCents = Math.max(Math.round(totalAmount * 100), 100);
+        try {
+            this.elements.update({ amount: amountInCents });
+        } catch (e) {
+            // Elements may not be ready yet during init
+            console.log('Elements amount update deferred:', e.message);
+        }
+
         // Update display
         document.getElementById('donation-amount-display').textContent = this.formatCurrency(baseAmount);
         document.getElementById('processing-fee-display').textContent = this.formatCurrency(processingFeeAmount);
@@ -481,11 +489,14 @@ class DonationWidget {
     }
 
     clearFormOnLoad() {
-        // Clear all form inputs to prevent browser auto-fill issues on refresh
-        const form = document.getElementById('donation-form');
-        if (form) {
-            form.reset();
-        }
+        // Clear our custom form inputs to prevent browser auto-fill issues on refresh
+        // (Stripe Elements handle their own state)
+        const occupation = document.getElementById('occupation');
+        const employer = document.getElementById('employer');
+        const comment = document.getElementById('comment');
+        if (occupation) occupation.value = '';
+        if (employer) employer.value = '';
+        if (comment) comment.value = '';
 
         // Specifically clear custom amount input
         const customAmountInput = document.getElementById('custom-amount-input');
@@ -512,7 +523,7 @@ class DonationWidget {
         // Update donation type button visual state
         this.updateDonationTypeButtons();
 
-        console.log('Form cleared on page load to prevent browser auto-fill issues');
+        console.log('Form cleared on page load');
     }
 
     addDevelopmentPreview() {
@@ -655,21 +666,20 @@ class DonationWidget {
     }
 
     getFormDataForPreview() {
-        // Try to get real form data first
-        const realFirstName = document.getElementById('first-name').value.trim();
-        const realLastName = document.getElementById('last-name').value.trim();
-        const realEmail = document.getElementById('email').value.trim();
+        // Try to get real form data from Stripe Elements and custom fields
+        const addr = this.addressValues || {};
+        const name = addr.name || {};
+        const address = addr.address || {};
 
-        // Use real data if available, otherwise use demo data
         return {
-            firstName: realFirstName || 'Jane',
-            lastName: realLastName || 'Smith',
-            email: realEmail || 'jane.smith@example.com',
-            phone: document.getElementById('phone').value.trim() || '(555) 123-4567',
-            address: document.getElementById('address').value.trim() || '123 Main Street',
-            city: document.getElementById('city').value.trim() || 'Anytown',
-            state: document.getElementById('state').value.trim() || 'CA',
-            zip: document.getElementById('zip').value.trim() || '90210',
+            firstName: name.firstName || name.first_name || 'Jane',
+            lastName: name.lastName || name.last_name || 'Smith',
+            email: this.linkAuthEmail || 'jane.smith@example.com',
+            phone: addr.phone || '(555) 123-4567',
+            address: address.line1 || '123 Main Street',
+            city: address.city || 'Anytown',
+            state: address.state || 'CA',
+            zip: address.postal_code || '90210',
             occupation: document.getElementById('occupation').value.trim() || 'Software Engineer',
             employer: document.getElementById('employer').value.trim() || 'Tech Company Inc.',
             comment: document.getElementById('comment').value.trim() || '',
@@ -741,20 +751,12 @@ class DonationWidget {
         const buttonText = document.getElementById('button-text');
 
         const hasAmount = this.totalAmount > 0;
-        const hasValidCard = this.cardComplete && !this.cardEmpty;
-        const hasRequiredFields = this.validateRequiredFields();
+        const hasPayment = this.paymentComplete;
+        const hasAddress = this.addressComplete;
+        const hasEmail = this.linkAuthComplete;
+        const hasFecFields = this.validateFecFields();
 
-        const isValid = hasAmount && hasValidCard && hasRequiredFields;
-
-        // Optional: Enable debug logging for development
-        // console.log('Button state:', {
-        //     hasAmount,
-        //     hasValidCard,
-        //     hasRequiredFields,
-        //     isValid,
-        //     cardComplete: this.cardComplete,
-        //     cardEmpty: this.cardEmpty
-        // });
+        const isValid = hasAmount && hasPayment && hasAddress && hasEmail && hasFecFields;
 
         button.disabled = !isValid;
 
@@ -770,225 +772,10 @@ class DonationWidget {
         }
     }
 
-    validateRequiredFields() {
-        const basicRequiredFields = ['first-name', 'last-name', 'address', 'city', 'state', 'occupation', 'employer'];
-        
-        // Check basic required fields
-        const basicFieldsValid = basicRequiredFields.every(fieldId => {
-            const field = document.getElementById(fieldId);
-            return field.value.trim() !== '';
-        });
-        
-        // Special validation for email, phone, and ZIP (don't show errors during form validation)
-        const emailValid = this.validateEmail(false);
-        const phoneValid = this.validatePhoneNumber(false);
-        const zipValid = this.validateZipCode(false);
-        
-        return basicFieldsValid && emailValid && phoneValid && zipValid;
-    }
-    
-    validatePhoneNumber(showErrors = true) {
-        const phoneField = document.getElementById('phone');
-        const phoneValue = phoneField.value.trim();
-        
-        // Clear any existing error if we're showing errors
-        if (showErrors) {
-            this.clearPhoneError();
-        }
-        
-        // Must not be empty
-        if (!phoneValue) {
-            if (showErrors) this.showPhoneError('Phone number is required');
-            return false;
-        }
-        
-        // Remove all non-digit characters to count digits
-        const digitsOnly = phoneValue.replace(/\D/g, '');
-        
-        // Must have at least 7 digits (minimum for any valid phone number)
-        if (digitsOnly.length < 7) {
-            if (showErrors) this.showPhoneError('Phone number must be at least 7 digits');
-            return false;
-        }
-        
-        // Must not exceed 15 digits (international standard)
-        if (digitsOnly.length > 15) {
-            if (showErrors) this.showPhoneError('Phone number too long (maximum 15 digits)');
-            return false;
-        }
-        
-        // Basic format validation - must contain only allowed characters
-        const validPattern = /^[\d\s\-\(\)\+\.x\,]+$/;
-        if (!validPattern.test(phoneValue)) {
-            if (showErrors) this.showPhoneError('Phone number contains invalid characters');
-            return false;
-        }
-        
-        return true;
-    }
-    
-    validateEmail(showErrors = true) {
-        const emailField = document.getElementById('email');
-        const emailValue = emailField.value.trim();
-        
-        // Clear any existing error if we're showing errors
-        if (showErrors) {
-            this.clearEmailError();
-        }
-        
-        // Must not be empty
-        if (!emailValue) {
-            if (showErrors) this.showEmailError('Email address is required');
-            return false;
-        }
-        
-        // Basic email format validation
-        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailPattern.test(emailValue)) {
-            if (showErrors) this.showEmailError('Please enter a valid email address');
-            return false;
-        }
-        
-        // Check for common typos in domain
-        const commonDomainTypos = {
-            'gmail.co': 'gmail.com',
-            'gmail.cm': 'gmail.com',
-            'gmial.com': 'gmail.com',
-            'yahoo.co': 'yahoo.com',
-            'yahoo.cm': 'yahoo.com',
-            'hotmail.co': 'hotmail.com',
-            'hotmail.cm': 'hotmail.com'
-        };
-        
-        const domain = emailValue.split('@')[1];
-        if (commonDomainTypos[domain]) {
-            if (showErrors) {
-                this.showEmailError(`Did you mean ${emailValue.split('@')[0]}@${commonDomainTypos[domain]}?`);
-            }
-            return false;
-        }
-        
-        return true;
-    }
-    
-    validateZipCode(showErrors = true) {
-        const zipField = document.getElementById('zip');
-        const zipValue = zipField.value.trim();
-        
-        // Clear any existing error if we're showing errors
-        if (showErrors) {
-            this.clearZipError();
-        }
-        
-        // Must not be empty
-        if (!zipValue) {
-            if (showErrors) this.showZipError('ZIP code is required');
-            return false;
-        }
-        
-        // Remove hyphens for length check
-        const zipDigits = zipValue.replace(/[^0-9]/g, '');
-        
-        // Must be either 5 digits or 9 digits (ZIP+4)
-        if (zipDigits.length !== 5 && zipDigits.length !== 9) {
-            if (showErrors) this.showZipError('ZIP code must be 5 digits (12345) or 9 digits (12345-6789)');
-            return false;
-        }
-        
-        // Validate format
-        const zipPattern = /^\d{5}(-\d{4})?$/;
-        if (!zipPattern.test(zipValue)) {
-            if (showErrors) this.showZipError('ZIP code format invalid. Use 12345 or 12345-6789');
-            return false;
-        }
-        
-        return true;
-    }
-    
-    showPhoneError(message) {
-        // Find or create phone error element
-        let errorElement = document.getElementById('phone-error');
-        if (!errorElement) {
-            errorElement = document.createElement('div');
-            errorElement.id = 'phone-error';
-            errorElement.className = 'field-error-message';
-            errorElement.style.cssText = `
-                color: #dc2626;
-                font-size: 12px;
-                margin-top: 4px;
-                display: block;
-            `;
-            
-            // Insert after the phone input
-            const phoneInput = document.getElementById('phone');
-            phoneInput.parentNode.insertBefore(errorElement, phoneInput.nextSibling);
-        }
-        
-        errorElement.textContent = message;
-        errorElement.style.display = 'block';
-    }
-    
-    clearPhoneError() {
-        const errorElement = document.getElementById('phone-error');
-        if (errorElement) {
-            errorElement.style.display = 'none';
-        }
-    }
-    
-    showEmailError(message) {
-        let errorElement = document.getElementById('email-error');
-        if (!errorElement) {
-            errorElement = document.createElement('div');
-            errorElement.id = 'email-error';
-            errorElement.className = 'field-error-message';
-            errorElement.style.cssText = `
-                color: #dc2626;
-                font-size: 12px;
-                margin-top: 4px;
-                display: block;
-            `;
-            
-            const emailInput = document.getElementById('email');
-            emailInput.parentNode.insertBefore(errorElement, emailInput.nextSibling);
-        }
-        
-        errorElement.textContent = message;
-        errorElement.style.display = 'block';
-    }
-    
-    clearEmailError() {
-        const errorElement = document.getElementById('email-error');
-        if (errorElement) {
-            errorElement.style.display = 'none';
-        }
-    }
-    
-    showZipError(message) {
-        let errorElement = document.getElementById('zip-error');
-        if (!errorElement) {
-            errorElement = document.createElement('div');
-            errorElement.id = 'zip-error';
-            errorElement.className = 'field-error-message';
-            errorElement.style.cssText = `
-                color: #dc2626;
-                font-size: 12px;
-                margin-top: 4px;
-                display: block;
-            `;
-            
-            const zipInput = document.getElementById('zip');
-            zipInput.parentNode.insertBefore(errorElement, zipInput.nextSibling);
-        }
-        
-        errorElement.textContent = message;
-        errorElement.style.display = 'block';
-    }
-    
-    clearZipError() {
-        const errorElement = document.getElementById('zip-error');
-        if (errorElement) {
-            errorElement.style.display = 'none';
-        }
+    validateFecFields() {
+        const occupation = document.getElementById('occupation');
+        const employer = document.getElementById('employer');
+        return occupation.value.trim() !== '' && employer.value.trim() !== '';
     }
 
     async handleSubmit() {
@@ -1001,47 +788,39 @@ class DonationWidget {
         this.setLoadingState(true);
 
         try {
-            // Get form data
+            // Validate Stripe Elements first
+            const { error: submitError } = await this.elements.submit();
+            if (submitError) {
+                console.error('Elements validation failed:', submitError);
+                this.showError(submitError.message);
+                this.setLoadingState(false);
+                return;
+            }
+
+            // Get form data (merges Stripe Element values + our custom fields)
             const formData = this.getFormData();
 
-            // Create payment intent on your server
+            // Create payment intent on server
             const { clientSecret } = await this.createPaymentIntent(formData);
 
-            console.log('💳 Confirming payment with Stripe...');
+            console.log('Confirming payment with Stripe...');
 
-            // Debug: Log the billing details being sent
-            const billingDetails = {
-                name: `${formData.firstName} ${formData.lastName}`,
-                email: formData.email,
-                phone: formData.phone || undefined,
-                address: {
-                    line1: formData.address,
-                    city: formData.city,
-                    state: formData.state,
-                    postal_code: formData.zip,
-                    country: 'US'
-                }
-            };
-
-            console.log('🏠 Billing details being sent to Stripe:', billingDetails);
-
-            // Confirm payment with Stripe
-            const result = await this.stripe.confirmCardPayment(clientSecret, {
-                payment_method: {
-                    card: this.card,
-                    billing_details: billingDetails,
+            // Confirm payment using Payment Element
+            const { error: confirmError } = await this.stripe.confirmPayment({
+                elements: this.elements,
+                clientSecret,
+                confirmParams: {
+                    return_url: window.location.href,
                 },
+                redirect: 'if_required',
             });
 
-            console.log('Payment confirmation result:', result);
-
-            if (result.error) {
-                console.error('❌ Payment failed:', result.error);
-                this.showError(result.error.message);
+            if (confirmError) {
+                console.error('Payment failed:', confirmError);
+                this.showError(confirmError.message);
                 this.setLoadingState(false);
             } else {
-                console.log('✅ Payment succeeded:', result.paymentIntent);
-                // Payment succeeded
+                console.log('Payment succeeded');
                 this.showSuccess();
             }
 
@@ -1053,15 +832,20 @@ class DonationWidget {
     }
 
     getFormData() {
+        // Extract billing details from Stripe Address Element values
+        const addr = this.addressValues || {};
+        const name = addr.name || {};
+        const address = addr.address || {};
+
         return {
-            firstName: document.getElementById('first-name').value.trim(),
-            lastName: document.getElementById('last-name').value.trim(),
-            email: document.getElementById('email').value.trim(),
-            phone: document.getElementById('phone').value.trim(),
-            address: document.getElementById('address').value.trim(),
-            city: document.getElementById('city').value.trim(),
-            state: document.getElementById('state').value.trim(),
-            zip: document.getElementById('zip').value.trim(),
+            firstName: name.firstName || name.first_name || '',
+            lastName: name.lastName || name.last_name || '',
+            email: this.linkAuthEmail || '',
+            phone: addr.phone || '',
+            address: address.line1 || '',
+            city: address.city || '',
+            state: address.state || '',
+            zip: address.postal_code || '',
             occupation: document.getElementById('occupation').value.trim(),
             employer: document.getElementById('employer').value.trim(),
             comment: document.getElementById('comment').value.trim(),
@@ -1135,99 +919,6 @@ class DonationWidget {
         errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
-    handlePhoneInput(event) {
-        const input = event.target;
-        let value = input.value;
-
-        // Allow digits, spaces, hyphens, parentheses, and plus sign
-        let filtered = value.replace(/[^0-9\s\-\(\)\+]/g, '');
-
-        // Detect if this looks like an international number (starts with +)
-        const isInternational = filtered.trim().startsWith('+');
-
-        if (isInternational) {
-            // For international numbers, just clean up and limit length
-            // Remove extra spaces and limit to reasonable length
-            filtered = filtered.replace(/\s+/g, ' ').trim();
-            if (filtered.length > 20) {
-                filtered = filtered.substring(0, 20);
-            }
-            input.value = filtered;
-        } else {
-            // For domestic numbers, apply US formatting
-            let digitsOnly = filtered.replace(/\D/g, '');
-
-            // Limit to 10 digits for US numbers
-            digitsOnly = digitsOnly.substring(0, 10);
-
-            // Format as (XXX) XXX-XXXX for US numbers
-            let formattedValue = '';
-            if (digitsOnly.length > 0) {
-                if (digitsOnly.length <= 3) {
-                    formattedValue = `(${digitsOnly}`;
-                } else if (digitsOnly.length <= 6) {
-                    formattedValue = `(${digitsOnly.substring(0, 3)}) ${digitsOnly.substring(3)}`;
-                } else {
-                    formattedValue = `(${digitsOnly.substring(0, 3)}) ${digitsOnly.substring(3, 6)}-${digitsOnly.substring(6)}`;
-                }
-            }
-            input.value = formattedValue;
-        }
-
-        // Clear any existing phone error when user is typing
-        this.clearPhoneError();
-        
-        // Update button state
-        this.updateDonateButton();
-    }
-    
-    handlePhoneBlur(event) {
-        // Validate phone number and show errors when user leaves the field
-        this.validatePhoneNumber(true);
-        this.updateDonateButton();
-    }
-    
-    handleEmailBlur(event) {
-        // Validate email and show errors when user leaves the field
-        this.validateEmail(true);
-        this.updateDonateButton();
-    }
-    
-    handleZipBlur(event) {
-        // Validate ZIP code and show errors when user leaves the field
-        this.validateZipCode(true);
-        this.updateDonateButton();
-    }
-
-    handleZipInput(event) {
-        const input = event.target;
-        let value = input.value;
-
-        // Remove all non-digit and non-hyphen characters
-        let filtered = value.replace(/[^0-9-]/g, '');
-
-        // Handle ZIP+4 format (12345-6789)
-        if (filtered.includes('-')) {
-            const parts = filtered.split('-');
-            const zip5 = parts[0].substring(0, 5); // First 5 digits
-            const zip4 = parts[1] ? parts[1].substring(0, 4) : ''; // Next 4 digits if present
-
-            if (zip4.length > 0) {
-                filtered = `${zip5}-${zip4}`;
-            } else {
-                filtered = zip5 + (parts.length > 1 ? '-' : '');
-            }
-        } else {
-            // Standard 5-digit ZIP
-            filtered = filtered.substring(0, 5);
-        }
-
-        // Update the input value
-        input.value = filtered;
-
-        // Update button state
-        this.updateDonateButton();
-    }
 }
 
 // Initialize widget when DOM is loaded

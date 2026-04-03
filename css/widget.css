@@ -407,25 +407,19 @@ h3 {
 }
 
 /* Stripe Elements */
-.stripe-element {
-    background: white;
-    padding: 12px;
-    border: 2px solid #e5e7eb;
-    border-radius: 4px;
-    transition: border-color 0.2s ease;
+.stripe-element-container {
+    margin-bottom: 16px;
 }
 
-.stripe-element:focus-within {
-    border-color: var(--primaryColor);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+#payment-element {
+    margin-top: 8px;
 }
 
-.StripeElement {
-    background: transparent;
-}
-
-.StripeElement--focus {
-    box-shadow: none;
+#link-authentication-element,
+#address-element,
+#payment-element {
+    /* Stripe Elements manage their own internal styling via the appearance API.
+       These containers just provide spacing. */
 }
 
 /* Error messages */
