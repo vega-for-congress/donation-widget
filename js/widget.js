@@ -44,7 +44,7 @@ class DonationWidget {
             // Clear any browser-retained form values (prevents refresh issues)
             this.clearFormOnLoad();
 
-            // Handle URL parameters for pre-filling amounts
+        // Handle URL parameters for pre-filling amounts and referral source
             this.handleUrlParameters();
 
             // Add development-only preview option
@@ -266,6 +266,9 @@ class DonationWidget {
         // Parse URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const amountParam = urlParams.get('amount');
+
+        // Track referral source (e.g. ?ref=moneybomb, ?ref=homepage)
+        this.referralSource = urlParams.get('ref') || 'direct';
 
         if (amountParam) {
             // Convert from cents to dollars
@@ -1071,6 +1074,7 @@ class DonationWidget {
             processingFee: Math.round(this.processingFeeAmount * 100),
             donationType: this.donationType,
             coverProcessingFee: this.coverProcessingFee,
+            referralSource: this.referralSource || 'direct',
         };
     }
 

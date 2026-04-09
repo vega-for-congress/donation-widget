@@ -150,7 +150,8 @@ app.post('/api/create-payment-intent', async (req, res) => {
             zip,
             occupation,
             employer,
-            comment
+            comment,
+            referralSource
         } = req.body;
 
         const paymentType = req.body.paymentType || 'card';
@@ -188,6 +189,7 @@ app.post('/api/create-payment-intent', async (req, res) => {
                     city: city || '',
                     state: state || '',
                     zip: zip || '',
+                    referral_source: referralSource || 'direct',
                 },
             };
 
@@ -241,7 +243,8 @@ app.post('/api/create-payment-intent', async (req, res) => {
                 occupation: occupation || '',
                 employer: employer || '',
                 comment: comment || '',
-                email_opt_in: (req.body.emailOptIn === true).toString()
+                email_opt_in: (req.body.emailOptIn === true).toString(),
+                referral_source: referralSource || 'direct'
             }
         };
         
@@ -298,7 +301,8 @@ app.post('/api/create-payment-intent', async (req, res) => {
                     occupation: occupation || '',
                     employer: employer || '',
                     comment: comment || '',
-                    email_opt_in: (req.body.emailOptIn === true).toString()
+                    email_opt_in: (req.body.emailOptIn === true).toString(),
+                    referral_source: referralSource || 'direct'
                 },
                 automatic_tax: {
                     enabled: false,
