@@ -153,47 +153,59 @@ app.post('/api/create-payment-intent', async (req, res) => {
             comment
         } = req.body;
 
+        const paymentType = req.body.paymentType || 'card';
+
         // Validate required fields
         if (!amount || amount < 50) { // Minimum $0.50
             console.log('❌ Invalid amount:', amount);
             return res.status(400).json({ error: 'Invalid amount' });
         }
 
-        if (!firstName || !lastName || !email) {
+        // For card payments, require billing details; for Link, Stripe provides them
+        if (paymentType !== 'link' && (!firstName || !lastName || !email)) {
             console.log('❌ Missing required fields:', { firstName: !!firstName, lastName: !!lastName, email: !!email });
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
         // Create customer (required for subscriptions, optional for one-time)
+        // For Link payments, Stripe attaches billing details to the PaymentMethod directly
         let customer = null;
+        const hasFullBilling = firstName && lastName && email;
         try {
             console.log('👤 Attempting to create customer...');
-            customer = await stripe.customers.create({
-                name: `${firstName} ${lastName}`,
-                email: email,
-                phone: phone || undefined,
-                address: {
-                    line1: address,
-                    city: city,
-                    state: state,
-                    postal_code: zip,
-                    country: 'US'
-                },
+            const customerCreateParams = {
                 metadata: {
                     processed_by: APP_NAME,
                     app_version: APP_VERSION,
+                    payment_type: paymentType,
                     occupation: occupation || '',
                     employer: employer || '',
                     comment: comment || '',
-                    donor_name: `${firstName} ${lastName}`,
-                    donor_email: email,
+                    donor_name: hasFullBilling ? `${firstName} ${lastName}` : '',
+                    donor_email: email || '',
                     phone: phone || '',
                     address: address || '',
                     city: city || '',
                     state: state || '',
-                    zip: zip || ''
-                }
-            });
+                    zip: zip || '',
+                },
+            };
+
+            // Include billing details when available (card flow)
+            if (hasFullBilling) {
+                customerCreateParams.name = `${firstName} ${lastName}`;
+                customerCreateParams.email = email;
+                customerCreateParams.phone = phone || undefined;
+                customerCreateParams.address = {
+                    line1: address,
+                    city: city,
+                    state: state,
+                    postal_code: zip,
+                    country: 'US',
+                };
+            }
+
+            customer = await stripe.customers.create(customerCreateParams);
             console.log('✅ Customer created:', customer.id);
         } catch (customerError) {
             console.log('⚠️ Could not create customer:', customerError.message);
@@ -211,8 +223,9 @@ app.post('/api/create-payment-intent', async (req, res) => {
         const paymentIntentData = {
             amount: amount, // Amount in cents
             currency: 'usd',
-            description: `Donation from ${firstName} ${lastName}`,
-            receipt_email: email,
+            payment_method_types: ['card', 'link'],
+            description: hasFullBilling ? `Donation from ${firstName} ${lastName}` : 'Donation via Link',
+            receipt_email: email || undefined,
             metadata: {
                 processed_by: APP_NAME,
                 app_version: APP_VERSION,
@@ -266,6 +279,9 @@ app.post('/api/create-payment-intent', async (req, res) => {
                 customer: customer.id, // Customer is required (we validated this above)
                 items: [{ price: price.id }],
                 payment_behavior: 'default_incomplete',
+                payment_settings: {
+                    payment_method_types: ['card', 'link'],
+                },
                 expand: ['latest_invoice.payment_intent'],
                 metadata: {
                     processed_by: APP_NAME,
@@ -425,6 +441,150 @@ app.get('/api/status', (req, res) => {
         keyType: process.env.STRIPE_RESTRICTED_KEY?.substring(0, 7) + '...',
         environment: process.env.NODE_ENV || 'development'
     });
+});
+
+// =========================================================
+// MONEYBOMB API — public read-only endpoint for fundraiser page
+// =========================================================
+
+// Moneybomb: env vars serve as optional defaults; query params override.
+const MONEYBOMB_DEFAULTS = {
+    start: process.env.MONEYBOMB_START || null,
+    end: process.env.MONEYBOMB_END || null,
+    goal: parseInt(process.env.MONEYBOMB_GOAL || '50000', 10),
+};
+
+// In-memory cache keyed by start+end so different params don't share stale data
+const moneybombCaches = {};
+const MONEYBOMB_CACHE_TTL = 30 * 1000; // 30 seconds
+
+/**
+ * Truncate full name to "First L." for privacy.
+ * "Maria Garcia" -> "Maria G."
+ * "Anonymous" -> "Anonymous"
+ */
+function truncateName(fullName) {
+    if (!fullName) return 'Anonymous';
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length < 2) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
+/**
+ * Format a relative time string from a timestamp.
+ */
+function timeAgo(created) {
+    const seconds = Math.floor((Date.now() / 1000) - created);
+    if (seconds < 60) return 'Just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * Fetch all succeeded payment intents in the moneybomb window from Stripe.
+ * Paginates automatically (Stripe caps at 100 per request).
+ */
+async function fetchMoneybombData(start, end, goal) {
+    const startTs = Math.floor(new Date(start).getTime() / 1000);
+    const endTs = Math.floor(new Date(end).getTime() / 1000);
+
+    let raised = 0;
+    let donors = 0;
+    const recentDonations = [];
+    let hasMore = true;
+    let startingAfter = undefined;
+
+    while (hasMore) {
+        const params = {
+            limit: 100,
+            created: { gte: startTs, lte: endTs },
+        };
+        if (startingAfter) params.starting_after = startingAfter;
+
+        const result = await stripe.paymentIntents.list(params);
+
+        for (const pi of result.data) {
+            // Only count succeeded payments from our app
+            if (pi.status !== 'succeeded') continue;
+            if (pi.metadata?.processed_by !== APP_NAME) continue;
+
+            const amountDollars = Math.round(pi.amount / 100);
+            raised += amountDollars;
+            donors += 1;
+
+            // Collect the 20 most recent for the feed
+            if (recentDonations.length < 20) {
+                recentDonations.push({
+                    name: truncateName(pi.metadata.donor_name),
+                    amount: amountDollars,
+                    message: pi.metadata.comment || '',
+                    location: pi.metadata.donor_state
+                        ? `${pi.metadata.donor_city || ''}, ${pi.metadata.donor_state}`.replace(/^,\s*/, '')
+                        : '',
+                    time: timeAgo(pi.created),
+                });
+            }
+        }
+
+        hasMore = result.has_more;
+        if (hasMore && result.data.length > 0) {
+            startingAfter = result.data[result.data.length - 1].id;
+        }
+    }
+
+    return {
+        mode: 'live',
+        goal,
+        raised,
+        donors,
+        recentDonations,
+        countdownEnd: end,
+        countdownStart: start,
+    };
+}
+
+app.get('/api/moneybomb', async (req, res) => {
+    // Query params override env-var defaults
+    const start = req.query.start || MONEYBOMB_DEFAULTS.start;
+    const end = req.query.end || MONEYBOMB_DEFAULTS.end;
+    const goal = parseInt(req.query.goal, 10) || MONEYBOMB_DEFAULTS.goal;
+
+    if (!start || !end) {
+        return res.status(400).json({
+            error: 'Missing start/end parameters',
+            hint: 'Pass ?start=ISO&end=ISO (or set MONEYBOMB_START/MONEYBOMB_END env vars as defaults)',
+        });
+    }
+
+    // Validate ISO dates
+    if (isNaN(new Date(start).getTime()) || isNaN(new Date(end).getTime())) {
+        return res.status(400).json({ error: 'Invalid start or end date (use ISO 8601)' });
+    }
+
+    try {
+        const now = Date.now();
+        const cacheKey = start + '|' + end;
+
+        // Serve from cache if fresh
+        const cached = moneybombCaches[cacheKey];
+        if (cached && now < cached.expiresAt) {
+            return res.json(cached.data);
+        }
+
+        // Fetch fresh data from Stripe
+        const data = await fetchMoneybombData(start, end, goal);
+
+        // Update cache
+        moneybombCaches[cacheKey] = { data, expiresAt: now + MONEYBOMB_CACHE_TTL };
+
+        res.json(data);
+    } catch (error) {
+        console.error('Moneybomb API error:', error.message);
+        res.status(500).json({ error: 'Failed to fetch moneybomb data' });
+    }
 });
 
 // Helper functions for webhook handling
