@@ -157,9 +157,11 @@ app.post('/api/create-payment-intent', async (req, res) => {
         const paymentType = req.body.paymentType || 'card';
 
         // Validate required fields
-        if (!amount || amount < 50) { // Minimum $0.50
+        if (!amount || amount < 100) { // Minimum $1.00 (100 cents)
             console.log('❌ Invalid amount:', amount);
-            return res.status(400).json({ error: 'Invalid amount' });
+            return res.status(400).json({ 
+                error: 'Invalid amount. Minimum donation is $1.00' 
+            });
         }
 
         // For card payments, require billing details; for Link, Stripe provides them

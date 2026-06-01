@@ -211,7 +211,13 @@ class DonationWidget {
 
     handleCustomAmount() {
         const input = document.getElementById('custom-amount-input');
-        const value = parseFloat(input.value) || 0;
+        let value = parseFloat(input.value) || 0;
+
+        // Enforce minimum $1 donation
+        if (value > 0 && value < 1) {
+            value = 1;
+            input.value = value.toFixed(2);
+        }
 
         this.clearSelectedAmountButtons();
         this.selectedAmount = 0;
@@ -328,7 +334,19 @@ class DonationWidget {
     }
 
     updateTotals() {
-        const baseAmount = this.selectedAmount || this.customAmount || 0;
+        let baseAmount = this.selectedAmount || this.customAmount || 0;
+
+        // Enforce minimum $1 donation
+        if (baseAmount > 0 && baseAmount < 1) {
+            this.showAmountError('Minimum donation is $1.00');
+            baseAmount = 1;
+            this.selectedAmount = 1;
+            this.customAmount = 0;
+            this.clearSelectedAmountButtons();
+            const customAmountInput = document.getElementById('custom-amount-input');
+            customAmountInput.value = '1.00';
+        }
+
         let processingFeeAmount = 0;
         let totalAmount = baseAmount;
         let canCoverFee = true;
@@ -743,7 +761,8 @@ class DonationWidget {
         const button = document.getElementById('donate-button');
         const buttonText = document.getElementById('button-text');
 
-        const hasAmount = this.totalAmount > 0;
+        const baseAmount = this.selectedAmount || this.customAmount || 0;
+        const hasAmount = baseAmount >= 1;
         const hasValidCard = this.cardComplete && !this.cardEmpty;
         const hasRequiredFields = this.validateRequiredFields();
 
@@ -995,6 +1014,12 @@ class DonationWidget {
     }
 
     async handleSubmit() {
+        const baseAmount = this.selectedAmount || this.customAmount || 0;
+        if (baseAmount < 1) {
+            this.showError('Minimum donation is $1.00');
+            return;
+        }
+
         if (this.totalAmount <= 0) {
             this.showError('Please select a donation amount.');
             return;
