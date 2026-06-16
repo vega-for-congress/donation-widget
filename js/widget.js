@@ -24,7 +24,7 @@ class DonationWidget {
         this.processingFeeFixed = 0.30;
 
         // Federal contribution limit
-        this.maxContributionAmount = 3500;
+        this.maxContributionAmount = 7000;
 
         this.init();
     }
