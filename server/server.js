@@ -157,7 +157,7 @@ app.post('/api/create-payment-intent', async (req, res) => {
         const paymentType = req.body.paymentType || 'card';
 
         // Validate required fields
-        if (!amount || amount < 100) { // Minimum $1.00 (100 cents)
+        if (!amount || amount < 500) { // Minimum $5.00 (500 cents)
             console.log('❌ Invalid amount:', amount);
             return res.status(400).json({ 
                 error: 'Invalid amount. Minimum donation is $1.00' 
