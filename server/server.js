@@ -151,10 +151,73 @@ app.post('/api/create-payment-intent', async (req, res) => {
             occupation,
             employer,
             comment,
-            referralSource
+            referralSource,
+            turnstileToken,
         } = req.body;
 
         const paymentType = req.body.paymentType || 'card';
+
+        // ── Turnstile siteverify ──────────────────────────────────────────────
+        const turnstileSecret = process.env.TURNSTILE_SECRET;
+        const expectedHostnames = (process.env.TURNSTILE_HOSTNAMES || '')
+            .split(',')
+            .map(h => h.trim())
+            .filter(Boolean);
+
+        if (!turnstileSecret) {
+            console.error('❌ TURNSTILE_SECRET env var is not set');
+            return res.status(500).json({ error: 'Server configuration error' });
+        }
+
+        if (
+            typeof turnstileToken !== 'string' ||
+            turnstileToken.length === 0 ||
+            turnstileToken.length > 2048 ||
+            expectedHostnames.length === 0
+        ) {
+            console.warn('❌ Turnstile token missing, malformed, or TURNSTILE_HOSTNAMES not configured');
+            return res.status(403).json({ error: 'Security check failed. Please refresh and try again.' });
+        }
+
+        let turnstileResult;
+        try {
+            const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || '';
+            const verifyRes = await fetch(
+                'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    signal: AbortSignal.timeout(10_000),
+                    body: new URLSearchParams({
+                        secret: turnstileSecret,
+                        response: turnstileToken,
+                        remoteip: clientIp,
+                    }),
+                }
+            );
+            if (!verifyRes.ok) throw new Error(`siteverify HTTP ${verifyRes.status}`);
+            turnstileResult = await verifyRes.json();
+        } catch (err) {
+            console.error('❌ Turnstile siteverify request failed:', err.message);
+            return res.status(403).json({ error: 'Security check failed. Please try again.' });
+        }
+
+        if (
+            !turnstileResult.success ||
+            turnstileResult.action !== 'donate' ||
+            !expectedHostnames.includes(turnstileResult.hostname)
+        ) {
+            console.warn('❌ Turnstile validation failed:', {
+                success: turnstileResult.success,
+                action: turnstileResult.action,
+                hostname: turnstileResult.hostname,
+                'error-codes': turnstileResult['error-codes'],
+            });
+            return res.status(403).json({ error: 'Security check failed. Please refresh and try again.' });
+        }
+
+        console.log('✅ Turnstile verified — action:', turnstileResult.action, 'hostname:', turnstileResult.hostname);
+        // ── End Turnstile siteverify ──────────────────────────────────────────
 
         // Validate required fields
         if (!amount || amount < 500) { // Minimum $5.00 (500 cents)

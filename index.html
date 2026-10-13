@@ -7,6 +7,7 @@
     <title>Donate | Vega for Congress</title>
     <link rel="icon" type="image/png" href="https://votevega.nyc/images/favicon.png">
     <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
     <link rel="stylesheet" href="css/widget.css">
 </head>
 
@@ -223,6 +224,16 @@
                         <span>Total:</span>
                         <span id="total-amount-display">$0.00</span>
                     </div>
+                </div>
+                <!-- Cloudflare Turnstile widget -->
+                <div class="cf-turnstile"
+                     data-sitekey="0x4AAAAAAFWCV7v-UyS7_qGD"
+                     data-action="donate"
+                     data-callback="onTurnstileSuccess"
+                     data-expired-callback="onTurnstileExpired"
+                     data-error-callback="onTurnstileError"
+                     id="turnstile-widget"
+                     style="margin: auto; margin-bottom: 12px;">
                 </div>
                 <button type="submit" id="donate-button" disabled>
                     <span id="button-text">Donate Now</span>

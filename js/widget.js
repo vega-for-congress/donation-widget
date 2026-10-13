@@ -19,6 +19,10 @@ class DonationWidget {
         this.cardComplete = false;
         this.cardEmpty = true;
 
+        // Turnstile state
+        this.turnstileToken = null;
+        this.turnstileWidgetId = null;
+
         // Processing fee calculation (typical rates: 2.9% + $0.30)
         this.processingFeeRate = 0.029;
         this.processingFeeFixed = 0.30;
@@ -55,6 +59,9 @@ class DonationWidget {
 
             // Initial calculations
             this.updateTotals();
+
+            // Setup Turnstile callbacks (must be on window for Turnstile to call them)
+            this.setupTurnstileCallbacks();
 
         } catch (error) {
             console.error('Error initializing donation widget:', error);
@@ -765,8 +772,9 @@ class DonationWidget {
         const hasAmount = baseAmount >= 1;
         const hasValidCard = this.cardComplete && !this.cardEmpty;
         const hasRequiredFields = this.validateRequiredFields();
+        const hasTurnstileToken = !!this.turnstileToken;
 
-        const isValid = hasAmount && hasValidCard && hasRequiredFields;
+        const isValid = hasAmount && hasValidCard && hasRequiredFields && hasTurnstileToken;
 
         // Optional: Enable debug logging for development
         // console.log('Button state:', {
@@ -1025,6 +1033,11 @@ class DonationWidget {
             return;
         }
 
+        if (!this.turnstileToken) {
+            this.showError('Please complete the security check.');
+            return;
+        }
+
         // Show loading state
         this.setLoadingState(true);
 
@@ -1066,6 +1079,8 @@ class DonationWidget {
             if (result.error) {
                 console.error('❌ Payment failed:', result.error);
                 this.showError(result.error.message);
+                // Reset Turnstile so the user can get a fresh token for a retry
+                this.resetTurnstile();
                 this.setLoadingState(false);
             } else {
                 console.log('✅ Payment succeeded:', result.paymentIntent);
@@ -1076,6 +1091,7 @@ class DonationWidget {
         } catch (error) {
             console.error('Payment error:', error);
             this.showError('Payment failed. Please try again.');
+            this.resetTurnstile();
             this.setLoadingState(false);
         }
     }
@@ -1100,6 +1116,7 @@ class DonationWidget {
             donationType: this.donationType,
             coverProcessingFee: this.coverProcessingFee,
             referralSource: this.referralSource || 'direct',
+            turnstileToken: this.turnstileToken,
         };
     }
 
@@ -1255,6 +1272,55 @@ class DonationWidget {
         input.value = filtered;
 
         // Update button state
+        this.updateDonateButton();
+    }
+
+    setupTurnstileCallbacks() {
+        // Turnstile calls these global functions; wire them to this instance.
+        window.onTurnstileSuccess = (token) => {
+            console.log('✅ Turnstile token received');
+            this.turnstileToken = token;
+            this.updateDonateButton();
+        };
+
+        window.onTurnstileExpired = () => {
+            console.warn('⚠️ Turnstile token expired');
+            this.turnstileToken = null;
+            this.updateDonateButton();
+        };
+
+        window.onTurnstileError = (code) => {
+            console.error('❌ Turnstile error:', code);
+            this.turnstileToken = null;
+            this.updateDonateButton();
+        };
+
+        // Capture the widget ID once Turnstile renders so we can reset it later.
+        const captureWidgetId = () => {
+            if (window.turnstile) {
+                const container = document.getElementById('turnstile-widget');
+                if (container && container.querySelector('iframe')) {
+                    this.turnstileWidgetId = window.turnstile.getWidgetId
+                        ? window.turnstile.getWidgetId(container)
+                        : null;
+                }
+            } else {
+                setTimeout(captureWidgetId, 200);
+            }
+        };
+        setTimeout(captureWidgetId, 500);
+    }
+
+    resetTurnstile() {
+        this.turnstileToken = null;
+        if (window.turnstile) {
+            const container = document.getElementById('turnstile-widget');
+            if (this.turnstileWidgetId != null) {
+                window.turnstile.reset(this.turnstileWidgetId);
+            } else if (container) {
+                window.turnstile.reset(container);
+            }
+        }
         this.updateDonateButton();
     }
 }
